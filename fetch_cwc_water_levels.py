@@ -43,6 +43,39 @@ DATE_RANGES = [
 # Set to None to pull all stations once you've confirmed it works.
 LIMIT = None
 
+# --- Experimental: try to find danger/warning level via the same endpoint ---
+# We don't have a confirmed datatype code for these (unlike "HHS" for water
+# level), so this tries a few plausible guesses on ONE station. If any of
+# them return non-empty data, that's your danger/warning level source.
+TEST_THRESHOLD_CODES = ["DL", "WL", "HFL", "DANGER", "WARNING", "DANGERLEVEL", "WARNINGLEVEL"]
+
+
+def try_threshold_codes(st_code: str):
+    print(f"\n--- Testing possible danger/warning-level datatype codes for {st_code} ---")
+    for code in TEST_THRESHOLD_CODES:
+        specification = (
+            '%7B%22where%22:%7B%22where%22:%7B%22where%22:%7B%22expression%22:'
+            '%7B%22valueIsRelationField%22:false,%22fieldName%22:%22id.stationCode%22,'
+            f'%22operator%22:%22eq%22,%22value%22:%22{st_code}%22%7D%7D,%22and%22:%7B%22expression%22:'
+            '%7B%22valueIsRelationField%22:false,%22fieldName%22:%22id.datatypeCode%22,'
+            f'%22operator%22:%22eq%22,%22value%22:%22{code}%22%7D%7D%7D,%22and%22:%7B%22expression%22:'
+            '%7B%22valueIsRelationField%22:false,%22fieldName%22:%22dataValue%22,'
+            '%22operator%22:%22null%22,%22value%22:%22false%22%7D%7D%7D,%22and%22:%7B%22expression%22:'
+            '%7B%22valueIsRelationField%22:false,%22fieldName%22:%22id.dataTime%22,'
+            '%22operator%22:%22btn%22,%22value%22:%222020-01-01T00:00:00.000,2024-12-31T00:00:00.000%22%7D%7D%7D'
+        )
+        params = {
+            "sort-criteria": "%7B%22sortOrderDtos%22:%5B%7B%22sortDirection%22:%22ASC%22,%22field%22:%22id.dataTime%22%7D%5D%7D",
+            "specification": specification,
+        }
+        try:
+            r = requests.get(URL, params=params, headers=HEADERS, timeout=20)
+            data = r.json() if r.status_code == 200 else []
+            print(f"  code={code!r}: status={r.status_code}, {len(data)} results"
+                  + (f" -- SAMPLE: {data[0]}" if data else ""))
+        except Exception as e:
+            print(f"  code={code!r}: ERROR {e}")
+
 
 def fetch_station_range(st_code: str, sdate: str, edate: str) -> pd.DataFrame:
     specification = (
@@ -79,6 +112,10 @@ def fetch_station_range(st_code: str, sdate: str, edate: str) -> pd.DataFrame:
 
 def main():
     stations = pd.read_csv(STATIONS_CSV)
+
+    # Quick one-time experiment to find a working danger/warning-level code
+    try_threshold_codes(stations.iloc[0]["code_id"])
+
     if LIMIT:
         stations = stations.head(LIMIT)
         print(f"TEST MODE: pulling only {LIMIT} station(s). "
